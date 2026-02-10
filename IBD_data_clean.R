@@ -1,18 +1,12 @@
----
-title: "IBD_data_clean"
-output: html_document
-date: "2025-05-26"
----
-
-```{r setup, message=FALSE, warning=FALSE, results='asis'}
 library(data.table)
 library(dplyr)
 library(tidyr)
 library(knitr)
 library(scales)
 library(readr)
-#datasets and metadata
+
 data_dir <- "/home/swang25/other_summary_statistics/"
+
 files <- tibble::tribble(
   ~id,         ~path,                                                              ~build,
   "GCST90044155", "/home/swang25/other_summary_statistics/IBD/GCST90044155_buildGRCh37.tsv.gz", "GRCh37",
@@ -21,24 +15,14 @@ files <- tibble::tribble(
   "GCST90476065", "/home/swang25/other_summary_statistics/IBD/GCST90476065.tsv.gz", "GRCh38",
   "GCST90476067", "/home/swang25/other_summary_statistics/IBD/GCST90476067.tsv.gz", "GRCh38",
   "ibd_build37_59957_20161107.txt.gz", "/home/swang25/other_summary_statistics/IBD/ibd_build37_59957_20161107.txt.gz", "GRCh37",
-  "IBD_trans_ethnic_association_summ_stats_b37.txt.gz", "/home/swang25/other_summary_statistics/IBD/IBD_trans_ethnic_association_summ_stats_b37.txt.gz","GRCh37")
-
+  "IBD_trans_ethnic_association_summ_stats_b37.txt.gz", "/home/swang25/other_summary_statistics/IBD/IBD_trans_ethnic_association_summ_stats_b37.txt.gz","GRCh37"
+)
 
 md <- knitr::kable(files, format = "markdown", caption = "Colorectal GWAS Files Metadata")
 cat(md, "\n")
 
-```
-
-```{r iterate-all-datasets, include=TRUE, echo=FALSE, message=TRUE, warning=TRUE, results='asis'}
-library(dplyr)
-library(tidyr)
-library(knitr)
-library(scales)
-library(readr)
-
+# preview + basic summaries
 setwd("~/other_summary_statistics/IBD/")
-
-# helper that never writes a temp file
 read_gwas <- function(path) {
   readr::read_tsv(path, show_col_types = FALSE)
 }
@@ -53,48 +37,50 @@ datasets <- tibble::tribble(
 ) %>%
   mutate(file = file.path(getwd(), file))
 
-# dataset head check
+# fast preview
 for (i in seq_len(nrow(datasets))) {
   ds <- datasets[i, ]
   cat("\n===== Dataset:", ds$id, "=====\n")
   cat("File:", ds$file, "\n")
-  
-  # Read only the first 5 rows for a fast preview
+
   dt_head <- fread(ds$file, nrows = 5)
-  
-  # Display column names and a preview
   cat("Column Names:\n")
   print(names(dt_head))
   cat("\nHead:\n")
   print(dt_head)
 }
 
+
+# per-dataset summary
 for (i in seq_len(nrow(datasets))) {
   ds <- datasets[i, ]
   cat("Dataset:", ds$id, "\n\n")
   cat("File:", ds$file, "\n\n")
-  
+
   raw <- read_gwas(ds$file)
   cat("Original dimensions:", nrow(raw), "rows ×", ncol(raw), "columns\n\n")
-  
+
   cat("Columns:\n")
   print(names(raw)); cat("\n")
-  
+
   df <- raw %>% select(chromosome, base_pair_location, effect_allele, other_allele, p_value)
+
   cat("Preview (first 5 rows):\n")
   print(kable(head(df, 5), format = "markdown")); cat("\n")
-  
+
   clean <- df %>% filter(!is.na(chromosome), !is.na(base_pair_location), !is.na(p_value))
   cat("Removed", nrow(df) - nrow(clean), "rows with missing; remaining:", nrow(clean), "\n\n")
   cat("Sample size (N):", ds$sample_size, "\n\n")
-  
+
   snp_summary <- tibble(
     `Total SNPs`  = nrow(df),
     `Unique SNPs` = n_distinct(df$base_pair_location)
   )
+
+
   cat("SNP counts:\n")
   print(kable(snp_summary, format = "markdown")); cat("\n")
-  
+
   pval_counts <- df %>%
     summarise(
       `<5e-8` = sum(p_value < 5e-8,  na.rm = TRUE),
@@ -103,24 +89,25 @@ for (i in seq_len(nrow(datasets))) {
       `<0.05` = sum(p_value < 0.05, na.rm = TRUE)
     ) %>%
     pivot_longer(everything(), names_to = "Threshold", values_to = "Count")
-  cat("P‑value thresholds:\n")
+
+  cat("P-value thresholds:\n")
   print(kable(pval_counts, format = "markdown")); cat("\n\n---\n\n")
 }
 
+# Cleaning
 
-```
-
-
-```{R}
 setwd("/home/swang25/other_summary_statistics/IBD/")
-here::i_am("IBD_data_clean.Rmd")
+
+# here::i_am("IBD_data_clean.Rmd")
 
 clean_gwas <- function(id, path, build) {
   cat("Cleaning", id, "(assembly:", build, ")\n\n")
-  
+
   raw <- read_tsv(path, show_col_types = FALSE)
   n0  <- nrow(raw)
   cat("Original rows:", n0, "Columns:", paste(names(raw), collapse=", "), "\n\n")
+
+  # uppercase alleles for consistency
   if ("effect_allele" %in% names(raw)) {
     raw$effect_allele <- toupper(raw$effect_allele)
   }
@@ -128,41 +115,49 @@ clean_gwas <- function(id, path, build) {
     raw$other_allele <- toupper(raw$other_allele)
   }
 
-# Drop strand-ambiguous SNPs
+  # Drop strand-ambiguous SNPs (A/T and C/G)
   if (all(c("effect_allele", "other_allele") %in% names(raw))) {
-  is_ambiguous <- (raw$effect_allele == "A" & raw$other_allele == "T") |
-                  (raw$effect_allele == "T" & raw$other_allele == "A") |
-                  (raw$effect_allele == "C" & raw$other_allele == "G") |
-                  (raw$effect_allele == "G" & raw$other_allele == "C")
-  cat("Strand-ambiguous SNPs removed:", sum(is_ambiguous), "\n\n")
-  raw <- raw[!is_ambiguous, ]
+    is_ambiguous <- (raw$effect_allele == "A" & raw$other_allele == "T") |
+                    (raw$effect_allele == "T" & raw$other_allele == "A") |
+                    (raw$effect_allele == "C" & raw$other_allele == "G") |
+                    (raw$effect_allele == "G" & raw$other_allele == "C")
+    cat("Strand-ambiguous SNPs removed:", sum(is_ambiguous), "\n\n")
+    raw <- raw[!is_ambiguous, ]
   }
-  # Filter missing
+
+  # Filter missing essential columns
   df <- raw %>%
     filter(!is.na(chromosome), !is.na(base_pair_location), !is.na(p_value))
   n1 <- nrow(df)
   cat("After dropping missing chr/BP/p_value:", n1, "(removed", n0-n1, ")\n\n")
+
   df <- df %>%
     mutate(
       chromosome = as.character(chromosome),
       base_pair_location = as.integer(base_pair_location)
     )
-  #remove multi base
+
+  # remove multi-base alleles (drops indels)
   df <- df %>%
     filter(nchar(effect_allele) == 1 & nchar(other_allele) == 1)
   cat("Removing multibase alleles:", nrow(df), "remain\n\n")
-  # remove same and other allele
+
+  # remove same effect and other allele
   same_allele <- df$effect_allele == df$other_allele
   df <- df[!same_allele, ]
   cat("SNPs with same effect and other alleles removed:", sum(same_allele), "\n")
 
-  
-  # Deduplicate
+  # Deduplicate by (chromosome, base_pair_location)
   df <- df %>%
     distinct(chromosome, base_pair_location, .keep_all = TRUE)
+
+  # include alleles to avoid collapsing multi-allelic sites
+  # distinct(chromosome, base_pair_location, effect_allele, other_allele, .keep_all = TRUE)
+
   n2 <- nrow(df)
   cat("After deduplication:", n2, "(removed", n1-n2, "dups)\n\n")
-  #odd ratio and beta
+
+  # odds_ratio and beta handling
   if ("odds_ratio" %in% names(df) & !"beta" %in% names(df)) {
     cat("Note: odds_ratio found, converting to beta using log(OR)\n")
     df <- df %>%
@@ -172,43 +167,36 @@ clean_gwas <- function(id, path, build) {
     df <- df %>%
       mutate(beta = ifelse(is.na(beta), log(odds_ratio), beta))
   }
-  
+
   # sort
   chr_levels <- c(as.character(1:22), "X","Y","MT")
   df <- df %>%
     mutate(chromosome = factor(chromosome, levels=chr_levels, ordered=TRUE)) %>%
     arrange(chromosome, base_pair_location) %>%
     mutate(chromosome = as.character(chromosome))
-  
+
   cat("Preview cleaned data:\n")
   print(kable(head(df,5), format="markdown"))
   cat("\n---\n\n")
-  
+
   out_path <- sub("\\.tsv(\\.gz)?(\\.1)?$", "_cleaned.tsv.gz", path)
   write_tsv(df, out_path)
   cat("Cleaned file:", out_path, "\n\n")
   return(out_path)
 }
 
-cleaned_paths <- apply(files, 1, function(r) 
+cleaned_paths <- apply(files, 1, function(r)
   clean_gwas(r["id"], r["path"], r["build"])
 )
 
-#clean_gwas("GCST90476067", "/home/swang25/other_summary_statistics/IBD/GCST90044155_buildGRCh38_c", "GRCh37")
+# clean_gwas("GCST90476067", "/home/swang25/other_summary_statistics/IBD/GCST90044155_buildGRCh38_c", "GRCh37")
 
 
-```
+# LiftOver GRCh37 -> GRCh38 for one dataset
 
-
-```{r liftover-with-chr-prefix, echo=FALSE}
 setwd("~/other_summary_statistics/IBD/")
 
-library(readr)
-library(dplyr)
-
-# assemble GRCh37‐cleaned file then convert it to GRCh38-cleaned file 
 df37 <- read_tsv("GCST90044155_buildGRCh37_cleaned.tsv.gz", show_col_types = FALSE)
-
 
 # coords.bed with 'chr' prefix
 coords <- df37 %>%
@@ -229,10 +217,9 @@ write.table(
   quote     = FALSE
 )
 
-# liftOver
+# liftOver (make sure!  ./liftOver and hg19ToHg38.over.chain.gz exist in this directory)
 system("./liftOver coords.bed hg19ToHg38.over.chain.gz mapped.bed unmapped.bed")
 
-# mapped.bed with correct types
 mapped <- read_tsv("mapped.bed",
                    col_names = c("chrom","start0","end1","idx"),
                    col_types = cols(
@@ -253,68 +240,60 @@ df38 <- df37 %>%
     base_pair_location = mapped$end1,
     assembly           = "GRCh38"
   )
+
 out38 <- "GCST90044155_buildGRCh38_cleaned.tsv.gz"
 write_tsv(df38, out38)
 
 cat("Lifted", nrow(df38), "of", nrow(df37),
     "variants to GRCh38 in file:", out38, "\n")
-```
-```{r liftover-check, message=FALSE, warning=FALSE}
-library(data.table)
+
+
+# LiftOver check
+
 ckeck_liftover <- "/home/swang25/other_summary_statistics/IBD/GCST90044155_buildGRCh38_cleaned.tsv.gz"
 
 cat("Previewing:", basename(ckeck_liftover))
 cat("File:", ckeck_liftover, "\n")
 dt_head <- fread(ckeck_liftover, nrows = 5)
 
-# display
 cat("Column Names:\n")
 print(names(dt_head))
 cat("\nHead:\n")
 print(dt_head)
 
-```
 
+# Manual file preview block 
 
-```{R}
-setwd("~/other_summary_statistics/IBD/")
+# just sanity checking
 
-# SNPs
 disc <- read_tsv("GCST90081487_buildGRCh38_cleaned.tsv.gz", show_col_types = FALSE)
 cat("GCST90081487 columns:\n"); print(names(disc))
 cat("\nGCST90081487 data preview:\n"); print(head(disc, 5))
-#
+
 rep1 <- read_tsv("GCST90292538_buildGRCh38_cleaned.tsv.gz", show_col_types = FALSE)
 cat("GCST90292538 columns:\n"); print(names(rep1))
 cat("\nGCST90292538 data preview:\n"); print(head(rep1, 5))
-#
+
 rep2 <- read_tsv("GCST90044155_buildGRCh38_cleaned.tsv.gz", show_col_types = FALSE)
 cat("GCST90044155 columns:\n"); print(names(rep2))
 cat("\nGCST90044155 data preview:\n"); print(head(rep2, 5))
-#
+
 rep3 <- read_tsv("GCST90476065_cleaned.tsv.gz", show_col_types = FALSE)
 cat("GCST90476065 columns:\n"); print(names(rep3))
 cat("\nGCST90476065 data preview:\n"); print(head(rep3, 5))
-#
+
 rep4 <- read_tsv("GCST90476067_cleaned.tsv.gz", show_col_types = FALSE)
 cat("GCST90476067 columns:\n"); print(names(rep4))
 cat("\nGCST90476067 data preview:\n"); print(head(rep4, 5))
 
-```
 
 
-
-```{r allele-harmonization-final, message=FALSE, warning=FALSE}
+# Allele harmonization QC (Top N)
 setwd("~/other_summary_statistics/IBD/")
 
-library(readr)
-library(dplyr)
-library(knitr)
 library(glue)
-# to convert negative beta--es_disc here
 N <- 10
 
-# top N by p-value
 disc <- read_tsv("GCST90081487_buildGRCh38_cleaned.tsv.gz", show_col_types=FALSE) %>%
   mutate(
     chromosome         = as.character(chromosome),
@@ -331,7 +310,6 @@ disc <- read_tsv("GCST90081487_buildGRCh38_cleaned.tsv.gz", show_col_types=FALSE
     p_disc    = p_value
   )
 
-# beta as es
 rep1 <- read_tsv("GCST90292538_cleaned.tsv.gz", show_col_types=FALSE) %>%
   mutate(
     chromosome         = as.character(chromosome),
@@ -346,7 +324,6 @@ rep1 <- read_tsv("GCST90292538_cleaned.tsv.gz", show_col_types=FALSE) %>%
     p_rep1  = p_value
   )
 
-# beta as es
 rep2 <- read_tsv("GCST90044155_buildGRCh38_cleaned.tsv.gz", show_col_types=FALSE) %>%
   mutate(
     chromosome         = as.character(chromosome),
@@ -361,7 +338,6 @@ rep2 <- read_tsv("GCST90044155_buildGRCh38_cleaned.tsv.gz", show_col_types=FALSE
     p_rep2  = p_value
   )
 
-# beta as es
 rep3 <- read_tsv("GCST90476065_cleaned.tsv.gz", show_col_types=FALSE) %>%
   mutate(
     chromosome         = as.character(chromosome),
@@ -375,7 +351,7 @@ rep3 <- read_tsv("GCST90476065_cleaned.tsv.gz", show_col_types=FALSE) %>%
     se_rep3 = standard_error,
     p_rep3  = p_value
   )
-# beta as es
+
 rep4 <- read_tsv("GCST90476067_cleaned.tsv.gz", show_col_types=FALSE) %>%
   mutate(
     chromosome         = as.character(chromosome),
@@ -390,7 +366,7 @@ rep4 <- read_tsv("GCST90476067_cleaned.tsv.gz", show_col_types=FALSE) %>%
     p_rep4  = p_value
   )
 
-# Harmonize each replicate dataset with the discovery dataset
+
 harm1 <- disc %>%
   inner_join(rep1, by = c("chromosome", "base_pair_location")) %>%
   mutate(
@@ -427,7 +403,6 @@ harm4 <- disc %>%
     ra4_adj = if_else(flip4, ea_rep4, ra_rep4)
   )
 
-# Merge
 harm <- harm1 %>%
   select(chromosome, base_pair_location,
          ea_disc, ra_disc, es_disc, se_disc, p_disc,
@@ -465,8 +440,4 @@ harm %>%
     caption = glue::glue("Allele Harmonization for Top {N} SNPs across 4 Replication Sets"),
     digits = 3
   )
-
-
-```
-
 
