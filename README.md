@@ -1,0 +1,1 @@
+# csmGmm_CRC_IBD_reproduce
