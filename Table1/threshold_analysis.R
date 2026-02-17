@@ -1,33 +1,28 @@
 #!/usr/bin/env Rscript
-# ------------------------------------------------------------
-#        CRC–IBD  Simulation  (sample-template, cleaned)
-# ------------------------------------------------------------
+# CRC–IBD  Simulation
 
 .libPaths("/home/swang25/R/ubuntu/4.4.1")
+
 suppressPackageStartupMessages({
-  library(MASS)       # mvrnorm
+  library(MASS)
   library(data.table)
-  library(dplyr)      # cummean()
+  library(dplyr)
   library(csmGmm)
-  library(here)
+  library(here)x
 })
 
+replication_mode <- FALSE   # FALSE = pleiotropy; TRUE = replication (same-direction constraint)
 
-## ---------- user switches -------------------------------------
-replication_mode <- FALSE   # FALSE = pleiotropy
-
-## ---------- command-line ID -----------------------------------
-args   <- commandArgs(trailingOnly = TRUE)
-aID    <- if (length(args)) as.numeric(args[1]) else 1
+args <- commandArgs(trailingOnly = TRUE)
+aID  <- if (length(args)) as.numeric(args[1]) else 1
 set.seed(aID)
 
-## ---------- constants -----------------------------------------
 nSNPs <- 9234567
-#nSNPs <- 1e6
+# nSNPs <- 1e6  # SUGGESTION: use small nSNPs for debugging locally
 
 Sigma <- diag(2)            # independent Z noise
 
-# three scenario π-vectors (from sample code)
+# three scenario π-vectors
 sProp <- list(
   s1 = c("0,0"=0.98,  "1,0"=0.005, "-1,0"=0.005, "0,1"=0.005, "0,-1"=0.005,
          "1,1"=0.0001,"-1,-1"=0.0001,"1,-1"=0.0001,"-1,1"=0.0001),
@@ -37,14 +32,15 @@ sProp <- list(
          "1,1"=0.001, "-1,-1"=0.001, "1,-1"=0.001, "-1,1"=0.001)
 )
 
-
 ## ---------- empirical μ ---------------------------------------
-library(data.table)
+# NOTE: you load muInfo from previous real-data EM output to set realistic effect sizes.
+# SUGGESTION: add file.exists() guard so the script fails with a clearer message.
+mu_file <- here::here("CRC_IBD", "output", "Fig4_data_aID1_muInfo.txt")
 
-mu_file <- here::here("CRC_IBD","output","Fig4_data_aID1_muInfo.txt")
-mu_emp  <- as.matrix(fread(mu_file, header = TRUE, data.table = FALSE)) #changed header to TRUE
+mu_emp <- as.matrix(fread(mu_file, header = TRUE, data.table = FALSE))  # changed header to TRUE
 storage.mode(mu_emp) <- "numeric"
 
+# helper functions: find first/last non-zero in each row of mu_emp
 first_nz <- function(x) { i <- which(is.finite(x) & x != 0); if (length(i)) i[1] else NA_integer_ }
 last_nz  <- function(x) { i <- which(is.finite(x) & x != 0); if (length(i)) i[length(i)] else NA_integer_ }
 
@@ -55,7 +51,7 @@ c2_shared <- last_nz (mu_emp[2, ])
 
 stopifnot(all(is.finite(c(c1_single, c1_shared, c2_single, c2_shared))))
 
-single_crc <- mu_emp[1, c1_single]  # from row1 first non-zero 
+single_crc <- mu_emp[1, c1_single]  # from row1 first non-zero
 shared_crc <- mu_emp[1, c1_shared]  # from row1 last  non-zero
 single_ibd <- mu_emp[2, c2_single]  # from row2 first non-zero
 shared_ibd <- mu_emp[2, c2_shared]  # from row2 last  non-zero
@@ -63,80 +59,107 @@ shared_ibd <- mu_emp[2, c2_shared]  # from row2 last  non-zero
 print(list(single_crc, shared_crc, single_ibd, shared_ibd))
 
 ## ---------- results frame -------------------------------------
+# NOTE: propCausal refers to "both-traits causal" as defined by is_both below.
 powerRes <- data.frame(
-  scenario      = names(sProp),
-  nCausal       = NA,  propCausal = NA,
-  nRejNew       = NA,  nRejMeta   = NA,
-  nRejThreshold1= NA,  nRejThreshold2 = NA, nRejThreshold3 = NA,
-  powerNew      = NA,  powerMeta  = NA,
-  powerThreshold1 = NA, powerThreshold2 = NA, powerThreshold3 = NA,
-  fdpNew        = NA,  fdpMeta    = NA,
-  fdpThreshold1 = NA,  fdpThreshold2 = NA,  fdpThreshold3 = NA,
-  seed          = aID
+  scenario         = names(sProp),
+  nCausal          = NA,  propCausal = NA,
+  nRejNew          = NA,  nRejMeta   = NA,
+  nRejThreshold1   = NA,  nRejThreshold2 = NA, nRejThreshold3 = NA,
+  powerNew         = NA,  powerMeta  = NA,
+  powerThreshold1  = NA,  powerThreshold2 = NA, powerThreshold3 = NA,
+  fdpNew           = NA,  fdpMeta    = NA,
+  fdpThreshold1    = NA,  fdpThreshold2 = NA,  fdpThreshold3 = NA,
+  seed             = aID
 )
 
 ## ---------- loop over the three π-scenarios -------------------
 for (i in seq_along(sProp)) {
-  
+
   ## ----- pattern catalogue {-1,0,+1}^2 ------------------------
+  # H enumerates the 9 latent states for (h1, h2)
   H <- CJ(h1 = -1:1, h2 = -1:1)
+
+  # Map latent pattern -> mean shifts mu1/mu2
+  # If h1 != 0 and h2 == 0 => trait1-only uses single_crc; if both nonzero => shared_crc, etc.
   H[, mu1 := fifelse(h1 == 0, 0,
                      sign(h1) * ifelse(h2 == 0, single_crc, shared_crc))]
   H[, mu2 := fifelse(h2 == 0, 0,
                      sign(h2) * ifelse(h1 == 0, single_ibd, shared_ibd))]
-  
+
   ## map named sProp to this CJ order
-  lab    <- paste(H$h1, H$h2, sep = ",")     # "-1,-1", "-1,0", ...
+  lab <- paste(H$h1, H$h2, sep = ",")  # "-1,-1", "-1,0", ..., "1,1"
   pi_vec <- as.numeric(sProp[[i]][lab])
   pi_vec[is.na(pi_vec)] <- 0
-  pi_vec <- pi_vec / sum(pi_vec)
+  pi_vec <- pi_vec / sum(pi_vec)      # normalize to sum 1
   sc_name <- names(sProp)[i]
 
   ## ----- simulate Z ------------------------------------------
-  pat <- sample.int(9, nSNPs, TRUE, pi_vec)        # *only this pi_vec*
+  pat <- sample.int(9, nSNPs, TRUE, pi_vec)  # draws latent states according to pi_vec
   mu  <- cbind(H$mu1[pat], H$mu2[pat])
-  
-  Z   <- mu + mvrnorm(nSNPs, c(0,0), Sigma)
-  Z[Z >  8.1] <-  8.1;  Z[Z < -8.1] <- -8.1
-  P   <- 1 - pchisq(Z^2, 1)
-  is_both <- (mu[,1] != 0 & mu[,2] != 0)
 
-  
-  ## ---------- quick sanity print (comment when happy) ---------
-  # cat(sc_name, ":  π₀ =", round(mean(!causal), 3),
-  #     "| shared =", round(mean(rowSums(abs(mu))==shared_crc+shared_ibd),4), "\n")
-  
+  Z <- mu + mvrnorm(nSNPs, c(0, 0), Sigma)   # add N(0, Sigma) noise
+  Z[Z >  8.1] <-  8.1
+  Z[Z < -8.1] <- -8.1                         # truncation to avoid numeric issues downstream
+
+  # P-values per-trait (chi-square 1df)
+  # NOTE: 1 - pchisq(Z^2, 1) is equivalent to 2*pnorm(-abs(Z)) for N(0,1)
+  P <- 1 - pchisq(Z^2, 1)
+
+  # "truth": both-traits non-null (pleiotropy)
+  is_both <- (mu[, 1] != 0 & mu[, 2] != 0)
+
   ## ----- thresholds --------------------------------
-  sameDir <- (Z[,1] > 0 & Z[,2] > 0) | (Z[,1] < 0 & Z[,2] < 0)
-  pass <- function(cut) if (replication_mode)
-    which(sameDir & P[,1] < cut & P[,2] < cut)
-  else
-    which(          P[,1] < cut & P[,2] < cut)
-  
-  idx <- list(t1 = pass(1e-8),
-              t2 = pass(1e-6),
-              t3 = pass(1e-5))
+  # For replication_mode you require same direction in both traits AND both p-values < cut
+  sameDir <- (Z[, 1] > 0 & Z[, 2] > 0) | (Z[, 1] < 0 & Z[, 2] < 0)
+
+  pass <- function(cut) {
+    if (replication_mode) {
+      which(sameDir & P[, 1] < cut & P[, 2] < cut)
+    } else {
+      which(P[, 1] < cut & P[, 2] < cut)
+    }
+  }
+
+  idx <- list(
+    t1 = pass(1e-8),
+    t2 = pass(1e-6),
+    t3 = pass(1e-5)
+  )
 
   ## ----- csmGmm -----------------------------------------------
-  initPi <- list(c(0.82), c(0.02,0.02), c(0.02,0.02), c(0.10))
-  initMu <- list(matrix(0,2,1),
-                 matrix(c(0,3, 0,6),2),
-                 matrix(c(3,0, 6,0),2),
-                 matrix(c(8,8),2))
-  
+  # NOTE: initPi/initMu define initialization for EM mixture model
+  initPi <- list(c(0.82), c(0.02, 0.02), c(0.02, 0.02), c(0.10))
+  initMu <- list(
+    matrix(0, 2, 1),
+    matrix(c(0, 3,  0, 6), 2),
+    matrix(c(3, 0,  6, 0), 2),
+    matrix(c(8, 8), 2)
+  )
+
+  # NOTE: if EM fails, you assign lfdr=1 for all SNPs (i.e., reject nothing)
   lfdr <- tryCatch(
-    symm_fit_ind_EM(Z, initMu, initPi,
-                    sameDirAlt = replication_mode,
-                    eps = 1e-5)$lfdrResults,
-    error = function(e) rep(1, nSNPs))
-  ord        <- order(lfdr)
-  idx$EM     <- ord[cummean(lfdr[ord]) <= 0.10]
-  
+    symm_fit_ind_EM(
+      Z,
+      initMu,
+      initPi,
+      sameDirAlt = replication_mode,
+      eps = 1e-5
+    )$lfdrResults,
+    error = function(e) rep(1, nSNPs)
+  )
+
+  # Rejection rule: sort lfdr and take largest prefix where cummean(lfdr) <= 0.10
+  ord    <- order(lfdr)
+  idx$EM <- ord[cummean(lfdr[ord]) <= 0.10]  # SUGGESTION: make 0.10 a parameter
+
   ## ----- meta -------------------------------------------------
-  w1 <- sqrt(446766); w2 <- sqrt(446865)
-  Pmeta  <- 2*pnorm(-abs((Z[,1]*w1 + Z[,2]*w2)/sqrt(w1^2+w2^2)))
+  # NOTE: meta-analysis p-value on weighted Z combination
+  # SUGGESTION: replace w1/w2 with the correct sample sizes for CRC/IBD in your harmonized dataset
+  w1 <- sqrt(446766)
+  w2 <- sqrt(446865)
+  Pmeta <- 2 * pnorm(-abs((Z[, 1] * w1 + Z[, 2] * w2) / sqrt(w1^2 + w2^2)))
   idx$meta <- which(Pmeta < 1e-8)
-  
+
   ## ----- summarise -------------------------------------------
   summarise <- function(v, truth) {
     n_rej <- length(v)
@@ -149,6 +172,7 @@ for (i in seq_along(sProp)) {
       if (n_rej == 0) NA_real_ else FP / n_rej    # FDP
     )
   }
+
   stats <- list(
     t1   = summarise(idx$t1,   is_both),
     t2   = summarise(idx$t2,   is_both),
@@ -157,17 +181,17 @@ for (i in seq_along(sProp)) {
     meta = summarise(idx$meta, is_both)
   )
 
-  powerRes[i, c("nRejThreshold1","powerThreshold1","fdpThreshold1")] <- stats$t1
-  powerRes[i, c("nRejThreshold2","powerThreshold2","fdpThreshold2")] <- stats$t2
-  powerRes[i, c("nRejThreshold3","powerThreshold3","fdpThreshold3")] <- stats$t3
-  powerRes[i, c("nRejNew","powerNew","fdpNew")]                     <- stats$EM
-  powerRes[i, c("nRejMeta","powerMeta","fdpMeta")]                  <- stats$meta
-  
+  powerRes[i, c("nRejThreshold1", "powerThreshold1", "fdpThreshold1")] <- stats$t1
+  powerRes[i, c("nRejThreshold2", "powerThreshold2", "fdpThreshold2")] <- stats$t2
+  powerRes[i, c("nRejThreshold3", "powerThreshold3", "fdpThreshold3")] <- stats$t3
+  powerRes[i, c("nRejNew",        "powerNew",        "fdpNew")]        <- stats$EM
+  powerRes[i, c("nRejMeta",       "powerMeta",       "fdpMeta")]       <- stats$meta
+
   powerRes$nCausal[i]    <- sum(is_both)     # count BOTH-traits
   powerRes$propCausal[i] <- mean(is_both)
-  
+
   cat("scenario", sc_name, "done | causal prop:",
-      round(powerRes$propCausal[i],4), "\n")
+      round(powerRes$propCausal[i], 4), "\n")
 }
 
 print(powerRes)
@@ -175,8 +199,9 @@ print(powerRes)
 ## ---------- write ---------------------------------------------
 out_dir <- here::here("CRC_IBD", "output")
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+
 outfile <- file.path(out_dir, sprintf("pleio_approach_aID%d.txt", aID))
-fwrite(powerRes, outfile, sep = '\t')
+fwrite(powerRes, outfile, sep = "\t")
 
 print(powerRes)
 cat("\nSaved to", outfile, "\n")
