@@ -1,0 +1,22 @@
+#!/bin/bash
+#BSUB -J summarize[1-1]
+#BSUB -q long
+#BSUB -n 4
+#BSUB -M 64
+#BSUB -R rusage[mem=64]
+#BSUB -W 25:00
+#BSUB -o /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/errDir/summarize_ukb_log%I.out
+#BSUB -e /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/errDir/summarize_ukb_%I.err
+#BSUB -cwd /rsrch8/home/biostatistics/swang25/other_summary_statistics
+
+
+
+# run 1-1
+module load R/4.4.1
+export R_LIBS_USER="/home/swang25/R/ubuntu/4.4.1"
+module load singularity
+
+# Execute the R script
+
+/risapps/rhel8/R/4.4.1/lib64/R/bin/Rscript \
+  /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/summarize_ukb_analysis.R $LSB_JOBINDEX 2 >/rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/errDir/summarize_ukb_S2_$LSB_JOBINDEX.out
