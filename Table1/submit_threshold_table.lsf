@@ -1,0 +1,21 @@
+#!/bin/bash
+#BSUB -J sim[1-100]
+#BSUB -q long
+#BSUB -n 4
+#BSUB -M 64
+#BSUB -R rusage[mem=64]
+#BSUB -W 25:00
+#BSUB -o /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/errDir/analysis.out
+#BSUB -e /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/errDir/analysis.err
+#BSUB -cwd /rsrch8/home/biostatistics/swang25/other_summary_statistics
+
+module load R/4.4.1
+export R_LIBS_USER="/home/swang25/R/ubuntu/4.4.1"
+module load singularity
+
+# Execute the R script
+
+/risapps/rhel8/R/4.4.1/lib64/R/bin/Rscript \
+  /rsrch8/home/biostatistics/swang25/other_summary_statistics/CRC_IBD/threshold_analysis.R \
+  ${LSB_JOBINDEX}
+  
