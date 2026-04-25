@@ -1,0 +1,17 @@
+#!/bin/bash
+#BSUB -J pleio[1]
+#BSUB -q long
+#BSUB -n 4
+#BSUB -M 64
+#BSUB -R rusage[mem=64]
+#BSUB -W 25:00
+#BSUB -o /rsrch8/home/biostatistics/swang25/other_summary_statistics/Fig1/errDir/Fig1_data_%I.out
+#BSUB -e /rsrch8/home/biostatistics/swang25/other_summary_statistics/Fig1/errDir/Fig1_data_%I.err
+#BSUB -cwd /rsrch8/home/biostatistics/swang25/other_summary_statistics
+
+module load R/4.4.1
+export R_LIBS_USER="/home/swang25/R/ubuntu/4.4.1"
+module load singularity
+/risapps/rhel8/R/4.4.1/lib64/R/bin/Rscript /home/swang25/other_summary_statistics/Fig1/make_fig4.R $LSB_JOBINDEX 1
+
+
