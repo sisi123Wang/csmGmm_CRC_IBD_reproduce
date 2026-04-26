@@ -4,7 +4,7 @@ This repository includes 5 main parts:
 
 1. Data cleaning
 
-2. Regional pleiotropy analysis for CRC vs IBD
+2. Regional pleiotropy analysis for CRC vs IBD and Table of Summary of regional pleiotropy analysis across 22 autosomal chromosomes.
    - Run `Regional Analysis Plot.R`
    - Change the package path and file path, for example:
      ```r
@@ -19,6 +19,7 @@ This repository includes 5 main parts:
    - Next, change the path in `plot_manhattan.R`
    - Then submit `submit_manhattan.lsf`
 
-5. Table
+5. Method Comparision Table
 
-6. Output files
+6. Please create output folder and errDir folder to store outputs.
+
