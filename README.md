@@ -12,7 +12,7 @@ This repository includes 5 main parts:
      ```
 
 3. Figure 1 -- Manhattan plot
-   - First, correct the path in 'two-way pleiotropy analysis.R' and run.
+   - First, correct the path in `two-way pleiotropy analysis.R` and run.
    - Then, correct the path in `make_fig4.R`
    - Then submit `run_pleio.lsf`
    - Do not forget to modify the file path
