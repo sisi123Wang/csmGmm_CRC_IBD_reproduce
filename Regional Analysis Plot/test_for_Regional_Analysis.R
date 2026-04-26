@@ -3,7 +3,7 @@
 # Purpose:
 # 1. Identify top pleiotropic regions using lfdr
 # 2. Plot one regional figure per chromosome
-# 3. Summarize the top SNPs in each plotted region
+# 3. Summarize the top SNPs in each plotted region - Table of Summary of regional pleiotropy analysis across 22 autosomal chromosomes.
 
 .libPaths("/home/swang25/R/ubuntu/4.4.1")
 
